@@ -93,6 +93,7 @@ Settings:
 | Renderer (Linux) | OpenGL | Vulkan: the port's own renderer. |
 | Smooth wheel zoom | Off | The wheel eases toward the pointer. |
 | Zoom out further | Off | The camera goes further out. |
+| Free camera | Off | Tilt, zoom and fly anywhere: Q E turn, Z X tilt, Page Up/Down zoom, Tab flies, Home resets. Its own settings show under it. |
 | Several keys at once | Off | Walk and turn at once, as on the PC. |
 | W A S D move the camera | Off | W A S D scroll and walk (Z Q S D on AZERTY). A and S no longer open All items and All staff. |
 | Varied sounds | On | Sounds vary, as on the PC. Off is the Mac's way. |
