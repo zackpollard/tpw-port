@@ -637,6 +637,11 @@ $<TARGET_FILE:tpw>\n$<TARGET_FILE:tpw_platform>\n$<JOIN:$<TARGET_OBJECTS:${objec
     add_executable(tpw_host_tpi_obstacle_shut ${TPW_DECOMP_DIR}/tests/host_tpi_obstacle_shut.cpp)
     target_include_directories(tpw_host_tpi_obstacle_shut PRIVATE ${TPW_INCLUDE_DIR})
     add_test(NAME tpi_obstacle_shut COMMAND tpw_host_tpi_obstacle_shut)
+    # The obstacle missions (include/TpiMissions.h): TpiMissions.sam read back, the staff mapping, needs, the saved word,
+    # the migration of a park saved before them, the mission's fence and the hoarding it grants, on made-up data.
+    add_executable(tpw_host_tpi_missions ${TPW_DECOMP_DIR}/tests/host_tpi_missions.cpp)
+    target_include_directories(tpw_host_tpi_missions PRIVATE ${TPW_INCLUDE_DIR})
+    add_test(NAME tpi_missions COMMAND tpw_host_tpi_missions)
   endif()
   # The TPI Worlds and Rides mod's start of a ride script (TPW_MOD_HOOK tpi_worlds, include/TpiRideScript.h): which scripts
   # start with SPECIAL set (a ride with an O animation), on made-up flags, without game data. The original has no such mod,

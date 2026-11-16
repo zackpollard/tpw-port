@@ -56,6 +56,7 @@
 #include "TPSound.h"
 #include "TpiBumperKind.h"
 #include "TpiGateFlow.h"
+#include "TpiMissions.h"
 #include "TpiObstacleShut.h"
 #include "TpiSaveRepair.h"
 #include "UI_Base.h"
@@ -1225,6 +1226,8 @@ void CSaveLoad::PostLoadOperations() {
     gGameWorld->GetControlManager()->CheckAllControlsInitialised();
     // TPW_PORT_FIX mods CSaveLoad::PostLoadOperations | Mac: (none: a park keeps the controls and research projects it saved) | Port: TPW_MOD_HOOK tpi_worlds: in one of the mod's worlds, once every type has a control, each type with no research cost saved unavailable or named by a research project has its control made again from its record, available, each research project whose type now has no research cost goes to the type it was made for, the two types' counts in the park recounted, and each researchable type with neither a project nor availability gets one (RepairTpiResearch, include/TpiSaveRepair.h) | Why: the mod's converter 14 gave Land of Invention's staff room the security camera's id (7730) and the camera the next one, but a park keeps the controls and research projects made when it started, so parks started before it kept the staff room with the camera's unresearched control and price, out of every build list, and the camera with no project, and counted their cameras as staff rooms; off, or an original world, a park loads as it was saved
     RepairTpiResearch();
+    // TPW_PORT_FIX mods CSaveLoad::PostLoadOperations | Mac: (none) | Port: TPW_MOD_HOOK tpi_worlds: in one of the mod's worlds with obstacle missions, a park saved before 0.5.6 (its missions word untagged) has each mission done whose obstacle its land already cleared, so nothing cleared then stands again (TpiMigrateParkMissions, include/TpiMissions.h) | Why: 0.5.6 clears obstacles by missions instead of land bought; off, or an original world, a park loads as it was saved
+    TpiMigrateParkMissions();
     RecalculateParkDarkening();
     gRestartParkClocks = 1;
     gClock.PostLoad();
