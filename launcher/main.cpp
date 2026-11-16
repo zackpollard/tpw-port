@@ -1278,6 +1278,7 @@ int ChooseFromDataFolder(tpw::Config& config, std::filesystem::path& packs,
             return PortFreeGameModifiers(
                 tpw::MacModifiersFromSDL(static_cast<uint16_t>(SDL_GetModState() | tpw::ScriptedSDLModifiers())));
         };
+        gPortFreeTableKey = PortFreeHookTableKey;
         tpw::gPortWheel = PortFreeHookWheel;
         tpw::gPortDragStart = PortFreeHookDragStart;
         tpw::gPortDragMove = PortFreeHookDragMove;

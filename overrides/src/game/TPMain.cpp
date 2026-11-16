@@ -347,6 +347,17 @@ void PortFreeHookDragEnd() {
 
 void PortFreeHookPinch(float scale) { PortFreePinch(scale, PortFreeOverPark()); }
 
+// The tables the park window asks for a key (ui_main.cpp Engine_GameWinMsg: debug, camera, game, shortcuts), enabled ones only.
+bool PortFreeHookTableKey(int32_t key, int32_t modifiers) {
+    CKeyTable* const tables[4] = {gKeyTableDebug, gKeyTableCamera, gKeyTableGame, gKeyTableShortcuts};
+    for (CKeyTable* const table : tables) {
+        if (table != nullptr && table->mEnabled != 0 &&
+            table->Search(static_cast<int16_t>(key), static_cast<int16_t>(modifiers)) >= 0)
+            return true;
+    }
+    return false;
+}
+
 // Command 3 (quit) asks for confirmation in the lobby (state 2) and in a park (state
 // 10); in any other state it ends UGamework::Run at once.
 void ThemeParkWorld::HandleCommand(int32_t command, uint32_t modifiers) {   // 0x10001170
