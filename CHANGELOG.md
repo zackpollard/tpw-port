@@ -5,6 +5,7 @@
 ### New Features
 
 - In the TPI Worlds and Rides mod's Land of Invention, The Great Lake is now a real boating lake: it can only be built with its back on the lake's water (buy the land by the lake first), and its boats sail out onto the lake with their wake on the water, then come back to let their riders off, who stay seated so you can ride along in first person; a Great Lake built away from the water in an older park keeps its boats on its own plot
+- In the TPI Worlds and Rides mod's three worlds, the Land of Invention gate, the Polar Zone swamp and tunnel, and the Arabian Nights rock, cliff and tunnel now clear as in Theme Park Inc, one after another, once your park meets each one's goal (visitors in the park, golden tickets won in that park, skilled staff and a researcher), and the park's land then grows as it did there: a message says what the next one needs and what you have, buying the land beside it no longer clears it, and whatever a saved park had already cleared stays cleared
 
 ### Bug Fixes
 
@@ -12,7 +13,7 @@
 - Fixed the game crashing when you point at certain fence cells over the tunnels in the TPI Worlds and Rides mod's Polar Zone and Arabian Nights parks loaded with 0.5.5
 - On a Mac, the launcher's Update button now updates the launcher and the game when the launcher is opened from Applications, instead of opening the release page (Thanks slappyhead)
 - In full screen, the pointer now stays on the game's screen instead of moving off onto another screen beside it (Thanks BMCTV)
-- Fixed the swamp in the TPI Worlds and Rides mod's Polar Zone not showing at all: it now lies in the ground in the northwest corner as in Theme Park Inc, nothing can be built on it, and it clears once your park buys the land beside it
+- Fixed the swamp in the TPI Worlds and Rides mod's Polar Zone not showing at all: it now lies in the ground in the northwest corner as in Theme Park Inc, and nothing can be built on it until it clears
 - Fixed snow counting as rain for visitors in the TPI Worlds and Rides mod's worlds: in snow, kids now cheer up while parents and grandparents lose more happiness than in rain, and everyone gets less thirsty and hungrier, as in Theme Park Inc
 
 ### Changes
