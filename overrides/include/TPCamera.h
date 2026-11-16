@@ -80,6 +80,9 @@ extern float gCameraWideZoomMax;       // 0x102b5a04  300.0 once set
 // False unless the launcher sets it, so a program that does not (the differential tests) keeps the original's limit.
 inline bool gPortFarZoom = false;
 inline constexpr float kPortFarZoomOut = 300.0f;   // the original's own wide limit (gCameraWideZoomMax)
+// TPW_PORT_FIX freecam gPortFreeCamera | Mac: (none: the tilt follows the zoom, the zoom stays within 70 and 130) | Port: true when the launcher's "Free camera" is on: the park view tilts freely, zooms from kPortFreeZoomIn to kPortFreeZoomOut and never goes below the ground, flies, and takes Q E Z X Page Up Page Down, middle and Option drags and a trackpad's swipes and pinches (include/PortFreeCamera.h, HandleCamera); false, the original camera, by default | Why: a modern camera for the park, as an opt-in that keeps the original's camera by default
+// False unless the launcher sets it, so a program that does not (the differential tests) keeps the original camera.
+inline bool gPortFreeCamera = false;
 extern int8_t gCameraWalkOnce;         // 0x102b59f8  set once by the first-person block
 extern float gCameraF59FC;             // 0x102b59fc  0.0 once set; nothing else reads it
 // Initialised data (0x1029cc60..0x1029ccb8).
