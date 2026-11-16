@@ -403,6 +403,12 @@ void UGamework::Run() {
                 HandleMouseWheel(event, static_cast<int32_t>(sdl.wheel.integer_y));
                 break;
             }
+#if defined(TPW_PORT_FIX) && SDL_VERSION_ATLEAST(3, 4, 0)
+            // TPW_PORT_FIX freecam pinch | Mac: (none) | Port: SDL 3.4's trackpad pinch goes to the Free camera's hook (zoom in orbit, a push in fly) | Why: SPEC's pinch; older SDLs have no pinch event, so the case is left out there
+            case SDL_EVENT_PINCH_UPDATE:
+                if (tpw::gPortPinch != nullptr) tpw::gPortPinch(sdl.pinch.scale);
+                break;
+#endif
             case SDL_EVENT_KEY_DOWN: {
                 // Alt+Enter on Windows and Linux toggles full screen (fit::FullScreenToggleKey; never on a Mac). It is
                 // the host's key: the game is not told of the press, no key is remembered for it, and its release is
