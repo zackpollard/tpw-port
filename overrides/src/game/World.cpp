@@ -48,8 +48,6 @@
 #include "TpiGateFlow.h"
 #include "TpiGenerations.h"
 #include "TpiGreatLake.h"
-#include "TpiMissions.h"
-#include "platform/samsutils.h"
 #include "TPMain.h"
 #include "UIInterface.h"
 #include "World.h"
@@ -393,19 +391,6 @@ bool CWorld::SetupNewLevel(char* levelFolder) {
                 tpw::TpiParseLake(text.data(), text.size(), tpw::gTpiLake);
         }
     }
-    // TPW_PORT_FIX mods CWorld::SetupNewLevel | Mac: none | Port: TPW_MOD_HOOK tpi_worlds (gModTpiWorlds, include/TpiMissions.h): with the mod on, reads the level's TpiMissions.sam (what clears each of its obstacles, which the converter writes into each of the mod's worlds only) into tpw::gTpiMissions; a level without the file has no missions and its obstacles clear as their land is bought | Why: tpw-mods tpi-worlds missions (0.5.6) | Off: the table stays empty, no file is read
-    tpw::gTpiMissions = tpw::TpiMissionTable{};
-    if (gModTpiWorlds) {
-        std::sprintf(buffer, "%s:%s", levelFolder, tpw::kTpiMissionsFile);
-        const int32_t length = LbFile_GetLength(buffer);
-        if (length > 0) {
-            std::string text(static_cast<size_t>(length), '\0');
-            int32_t loaded = 0;
-            if (LbFile_Load(buffer, text.data(), static_cast<uint32_t>(length), &loaded).Succeeded())
-                tpw::TpiParseMissions(text.data(), text.size(), tpw::gTpiMissions);
-        }
-        SamsUtilities::UDebug("port: tpi-worlds: %d obstacle missions", static_cast<int>(tpw::gTpiMissions.count));
-    }
     mTurn = 0;
     mStartTime = static_cast<uint32_t>(std::time(nullptr));
     GetMap()->Init();
@@ -729,8 +714,6 @@ void CWorld::DoGameTurn() {
     DeletePendingThings();
     reinterpret_cast<CMacroAI*>(this)->Update();
     gActionRecorder.DoTick();
-    // TPW_PORT_FIX mods CWorld::DoGameTurn | Mac: none | Port: TPW_MOD_HOOK tpi_worlds (include/TpiMissions.h): every 30th turn in one of the mod's worlds, its obstacle missions are checked against the park (TpiMissionsTurn) | Why: tpw-mods tpi-worlds missions (0.5.6) | Off: nothing runs
-    if (mTurn % 30 == 0) TpiMissionsTurn();
 }
 
 // 0x1013b608 (116 bytes). A game turn when the game type is the online one (the game type object is built on first use).

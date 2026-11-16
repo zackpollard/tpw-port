@@ -43,13 +43,7 @@
 #include "LevelSystems.h"
 #include "MainBalance.h"
 #include "MapCell.h"
-#include "FS_MasterSave.h"
-#include "LLCellSystem.h"
-#include "ThingReceivers.h"
 #include "TpiGateFlow.h"
-#include "TpiMissions.h"
-#include "TpiWorlds.h"
-#include "ui_main.h"
 #include "TpiObstacleGate.h"
 #include "TpiObstacleShut.h"
 #include "TpiSaveRepair.h"
@@ -569,9 +563,6 @@ bool TpiParkOwns(int32_t x, int32_t y) {
     return (cell->mFlags & 0x40) == 0;
 }
 
-// The park's missions word (include/TpiMissions.h): the litter mark time of map cell kTpiMissionCell, saved with the cells.
-uint32_t& TpiMissionWord() { return gGameWorld->mMapCells[tpw::kTpiMissionCell].mTimeMarkedForLitterCollection; }
-
 // Swings each opening gate's leaves a tick towards open while the park owns a cell of its footprint or a cell next to
 // it that a new park does not start with, towards closed while it owns none. A node whose matrix is not the one
 // written last (a terrain just loaded, a park just loaded) takes the pose of the park's land at once, so a loaded park
@@ -598,8 +589,7 @@ void TpiSwingGates() {
     const tpw::TpiStartFence fence = TpiLevelStartFence();
     const auto start = [&fence](int32_t x, int32_t y) { return tpw::TpiStartLand(fence, x, y); };
     for (TpiGateLeafNode& leaf : leaves) {
-        const bool open = tpw::TpiObstacleGone(tpw::gTpiMissions, TpiMissionWord(), leaf.leaf.x, leaf.leaf.y, leaf.leaf.w,
-                                               leaf.leaf.h, [&] { return tpw::TpiGateOpen(leaf.leaf, TpiParkOwns, start); });
+        const bool open = tpw::TpiGateOpen(leaf.leaf, TpiParkOwns, start);
         const bool fresh = std::memcmp(&leaf.node->mMatrix, &leaf.written, sizeof(sMatrix)) != 0;
         const float way = fresh ? (open ? 1.0f : 0.0f) : tpw::TpiGateStep(leaf.way, open);
         if (!fresh && way == leaf.way) continue;
@@ -715,9 +705,7 @@ void TpiShowShutObstacles() {
     const tpw::TpiStartFence fence = TpiLevelStartFence();
     const auto start = [&fence](int32_t x, int32_t y) { return tpw::TpiStartLand(fence, x, y); };
     for (TpiShutObstacle& obstacle : obstacles) {
-        const bool gone =
-            tpw::TpiObstacleGone(tpw::gTpiMissions, TpiMissionWord(), obstacle.shut.x, obstacle.shut.y, obstacle.shut.w,
-                                 obstacle.shut.h, [&] { return tpw::TpiShutCleared(obstacle.shut, TpiParkOwns, start); });
+        const bool gone = tpw::TpiShutCleared(obstacle.shut, TpiParkOwns, start);
         const bool changed = obstacle.gone != static_cast<int32_t>(gone);
         obstacle.gone = gone ? 1 : 0;
         for (TpiShutNode& node : obstacle.nodes) {
@@ -737,133 +725,6 @@ void TpiShowShutObstacles() {
 }
 
 }  // namespace
-
-namespace {
-
-// The 0.5.5 land rule for a mission's obstacle: the park owns land around its footprint that a new park lacks.
-bool TpiMissionLandCleared(const tpw::TpiMission& m) {
-    const tpw::TpiStartFence fence = TpiLevelStartFence();
-    tpw::TpiGateLeaf leaf;
-    leaf.x = m.x;
-    leaf.y = m.y;
-    leaf.w = m.w;
-    leaf.h = m.h;
-    return tpw::TpiGateOpen(leaf, TpiParkOwns, [&fence](int32_t x, int32_t y) { return tpw::TpiStartLand(fence, x, y); });
-}
-
-// What the park has now for a mission: golden tickets won in this park, visitors in it, live staff by kind and grade.
-tpw::TpiParkNow TpiMissionParkNow() {
-    tpw::TpiParkNow now;
-    if (gMasterSave != nullptr && gMasterSave->mCurrent != nullptr) now.tickets = gMasterSave->mCurrent->HowManyTickets();
-    now.visitors = gGameWorld->GetParkAnalyser()->NumberOfVisitorsInPark();
-    for (CThingArrayEntry* entry = gUsedThingHead; entry != nullptr; entry = entry->mNextUsed) {
-        const CThing* thing = static_cast<const CThing*>(entry->mThing);
-        if (thing == nullptr || thing->mDead != 0 || thing->mKind < tpw::kTpiKindMechanic || thing->mKind > tpw::kTpiKindResearcher)
-            continue;
-        ++now.staff[thing->mKind];
-        if (reinterpret_cast<const CStaff*>(thing)->mCurrentPayGrade >= tpw::kTpiSkilledGrade) ++now.skilled[thing->mKind];
-    }
-    return now;
-}
-
-// Shows a mission's message as a tag (the version tag's kind: id 0x17e, its text the mod's own). A tag of the same
-// kind (mF20) still shown takes the new text in its place.
-void TpiMissionTag(const char* text, int32_t kind) {
-    char16_t wide[256];
-    tpw::TpiCopyAscii(text, wide, 256);
-    CTagParams params = {};
-    params.mId = 0x17e;
-    params.mF4 = 0x17e;
-    params.mText = wide;
-    params.mTime = 0;
-    params.mF20 = kind;
-    params.mShow = 1;
-    InterfaceWindow* window = AddATag(params);
-    if (window != nullptr) ShowTagPanel(window);
-}
-
-// Grows the park's land towards the land a done mission's hoarding holds, as Buy Land would, free: rectangles on the
-// hoarding's lattice (TpiPlanGrants), each checked by LLCC_IsHoardingEditLegal without a charge and drawn by
-// LLCC_ReviseHoarding, the best legal one each step, at most 40 steps. Land it cannot reach stays for sale. False
-// while the cell system is busy (a Buy Land in progress): it is tried again next time.
-bool TpiGrantMissionLand(const tpw::TpiMission& m) {
-    if (m.fenceCount < 3) return true;
-    if (LLCC_SystemGetMode() != 0) return false;
-    const tpw::TpiStartFence start = TpiLevelStartFence();
-    const tpw::TpiStartFence fence = tpw::TpiMissionFence(m, start.left, start.right, start.bottom);
-    static uint8_t want[128 * 128], owned[128 * 128];
-    for (int32_t y = 0; y < 128; ++y)
-        for (int32_t x = 0; x < 128; ++x) want[x + 128 * y] = tpw::TpiInsideFence(fence, x, y) ? 1 : 0;
-    int32_t steps = 0, grown = 0;
-    for (; steps < 40; ++steps) {
-        for (int32_t y = 0; y < 128; ++y)
-            for (int32_t x = 0; x < 128; ++x) owned[x + 128 * y] = TpiParkOwns(x, y) ? 1 : 0;
-        tpw::TpiGrantRect rects[16];
-        const int32_t n = tpw::TpiPlanGrants(want, owned, gHoardingRight, gHoardingBottom, gLLCCWidth - 2, gLLCCHeight - 3,
-                                             rects, 16);
-        bool drawn = false;
-        for (int32_t i = 0; i < n && !drawn; ++i) {
-            LLCC_CreateCurrentHoardingImage();
-            if (LLCC_IsHoardingEditLegal(rects[i].lox, rects[i].loy, rects[i].hix, rects[i].hiy, false) == 0) continue;
-            LLCC_ReviseHoarding(rects[i].lox, rects[i].loy, rects[i].hix, rects[i].hiy);
-            grown += rects[i].gain;
-            drawn = true;
-        }
-        if (!drawn) break;
-    }
-    SamsUtilities::UDebug("port: tpi-worlds: mission %d: the park's land grew by %d cells in %d steps", static_cast<int>(m.number),
-                          static_cast<int>(grown), static_cast<int>(steps));
-    return true;
-}
-
-int32_t gTpiMissionBriefed = -1;   // the mission whose brief was last shown, -1 none (this level's play)
-int32_t gTpiMissionGrant = -1;     // a done mission whose land is still to grant, -1 none
-
-}  // namespace
-
-// TPW_PORT_FIX mods TpiMigrateParkMissions | Mac: none | Port: TPW_MOD_HOOK tpi_worlds (include/TpiMissions.h): in one of the mod's worlds with missions, a park whose missions word has no tag (a new park, or one saved before 0.5.6) gets it, with each mission done whose obstacle the park's land already cleared under 0.5.5's rule | Why: tpw-mods tpi-worlds missions; nothing cleared in a 0.5.5 park stands again | Off: not called
-void TpiMigrateParkMissions() {
-    gTpiMissionBriefed = -1;
-    gTpiMissionGrant = -1;
-    if (!tpw::TpiWorldInPlay() || tpw::gTpiMissions.count == 0 || gGameWorld == nullptr) return;
-    uint32_t& word = TpiMissionWord();
-    if (tpw::TpiMissionsTagged(word)) return;
-    word = tpw::TpiMigrateMissions(tpw::gTpiMissions, word, TpiMissionLandCleared);
-    SamsUtilities::UDebug("port: tpi-worlds: missions word %08x", static_cast<unsigned>(word));
-}
-
-// TPW_PORT_FIX mods TpiMissionsTurn | Mac: none | Port: TPW_MOD_HOOK tpi_worlds (include/TpiMissions.h): every 30th game turn in one of the mod's worlds with missions, the first mission not done is checked against the park (golden tickets won here, visitors in the park, skilled staff of each kind, a researcher for research); its brief is shown once as a tag, and when the park has everything its bit is set, a tag says so and the park's land grows towards the mission's hoarding (TpiGrantMissionLand) | Why: tpw-mods tpi-worlds; Theme Park Inc cleared its obstacles with missions (the maintainer, 0.5.6) | Off: not called
-void TpiMissionsTurn() {
-    if (!tpw::TpiWorldInPlay() || tpw::gTpiMissions.count == 0 || gGameWorld == nullptr) return;
-    uint32_t& word = TpiMissionWord();
-    if (!tpw::TpiMissionsTagged(word)) TpiMigrateParkMissions();
-    if (gTpiMissionGrant >= 0) {
-        for (int32_t i = 0; i < tpw::gTpiMissions.count; ++i)
-            if (tpw::gTpiMissions.missions[i].number == gTpiMissionGrant && !TpiGrantMissionLand(tpw::gTpiMissions.missions[i]))
-                return;
-        gTpiMissionGrant = -1;
-    }
-    const int32_t active = tpw::TpiActiveMission(tpw::gTpiMissions, word);
-    if (active < 0) return;
-    const tpw::TpiMission& m = tpw::gTpiMissions.missions[active];
-    const tpw::TpiParkNow now = TpiMissionParkNow();
-    char text[256];
-    if (tpw::TpiMissionMet(tpw::TpiMissionNeedsOf(m), now)) {
-        word = tpw::TpiMissionSetDone(word, m.number);
-        SamsUtilities::UDebug("port: tpi-worlds: mission %d done, missions word %08x", static_cast<int>(m.number),
-                              static_cast<unsigned>(word));
-        tpw::TpiMissionDoneText(m, text, sizeof text);
-        TpiMissionTag(text, 0x7471);
-        gTpiMissionGrant = m.number;
-        if (TpiGrantMissionLand(m)) gTpiMissionGrant = -1;
-        return;
-    }
-    if (gTpiMissionBriefed != m.number) {
-        gTpiMissionBriefed = m.number;
-        tpw::TpiMissionText(m, now, text, sizeof text);
-        TpiMissionTag(text, 0x7470);
-    }
-}
 
 void EngineTick1() {
     g3DRefreshFlags = 0;
