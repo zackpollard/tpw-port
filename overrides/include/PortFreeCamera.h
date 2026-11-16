@@ -21,6 +21,9 @@ inline bool gPortFreeThroughGround = false;       // Fly through the ground
 // The modifiers held now, as the game's modifier byte (3 shift, 0xc command or control, 0x30 option); the launcher sets it
 // (the platform's key state). None: no modifier.
 inline int32_t (*gPortFreeModifiers)() = nullptr;
+// Whether one of the key tables the park's keys go to has an entry for a key with these modifiers (PortFreeHookTableKey, set
+// by the launcher), so the free camera leaves that key to them. None: no table has any.
+inline bool (*gPortFreeTableKey)(int32_t key, int32_t modifiers) = nullptr;
 
 // The limits. The tilt (gCameraPitch, the angle down from the horizon) goes from just above the horizon to straight down;
 // the zoom (gCameraF68, the distance from the target) from 25 to 300.
@@ -28,7 +31,10 @@ inline constexpr float kPortFreePitchLow = 0.05f;      // about 3 degrees
 inline constexpr float kPortFreePitchHigh = 1.5533f;   // about 89 degrees
 inline constexpr float kPortFreeZoomIn = 25.0f;
 inline constexpr float kPortFreeZoomOut = 300.0f;
-inline constexpr float kPortFreeGroundMargin = 4.0f;   // the eye stays this far above the ground under it
+// The eye stays this far above the height field under it. Not less: where the park's ground is a model and not the height
+// field (outside the entrance gate), a lower eye sits under that model and sees the sky through it (the live check's
+// pictures p2-low-hole and p2-low-fixed).
+inline constexpr float kPortFreeGroundMargin = 15.0f;
 inline constexpr float kPortFreeTiltRate = 0.0012f;    // Z and X: radians a millisecond
 inline constexpr float kPortFreeDragTurn = 0.005f;     // a mouse drag: radians a pixel at sensitivity 1
 inline constexpr float kPortFreeSwipeTurn = 0.03f;     // a swipe: radians a unit of SDL's precise delta
@@ -207,13 +213,14 @@ inline bool PortFreeFlying() { return gPortFreeCamera && (gPortFree.flyWanted ||
 // TPW_PORT_FIX freecam PortFreeHearsFromEye | Mac: (none: outside first person the ear is halfway to what the camera looks at) | Port: with gPortFreeCamera on and the camera flying, the ear is at the eye, as in first person (GameSys.cpp) | Why: sound heard from the eye in fly mode, as SPEC asks
 inline bool PortFreeHearsFromEye() { return gPortFreeCamera && gPortFree.fly; }
 
-// TPW_PORT_FIX freecam PortFreeCameraKey | Mac: (none) | Port: with gPortFreeCamera on, over the park (not in first person): Tab starts and ends fly mode; in the orbit, Q and E press the camera table's turn keys (the left and right arrows, so the Isometric option's quarter-turn snap holds), Page Up and Page Down its zoom keys (the up arrow, zoom in, and the down arrow, zoom out), and Z and X tilt (held bits HandleCamera reads); in fly mode W A S D, Q and E, Z and X, Page Up and Page Down are all held bits HandleCamera reads (W A S D whether or not "W A S D move the camera" is on); Shift and Option may be held (faster, slower), Command and Control leave the key to the tables; the key up lets go of what its key down took; true when the key was taken | Why: the Free camera's keys, as SPEC asks
+// TPW_PORT_FIX freecam PortFreeCameraKey | Mac: (none) | Port: with gPortFreeCamera on, over the park (not in first person): Tab starts and ends fly mode; in the orbit, Q and E press the camera table's turn keys (the left and right arrows, so the Isometric option's quarter-turn snap holds), Page Up and Page Down its zoom keys (the up arrow, zoom in, and the down arrow, zoom out), and Z and X tilt (held bits HandleCamera reads); in fly mode W A S D, Q and E, Z and X, Page Up and Page Down are all held bits HandleCamera reads (W A S D whether or not "W A S D move the camera" is on); Shift and Option may be held (faster, slower), Command and Control leave the key to the tables, and so does a key with modifiers one of the tables has (Option-S, the quick save); the key up lets go of what its key down took; true when the key was taken | Why: the Free camera's keys, as SPEC asks
 inline bool PortFreeCameraKey(int32_t key, int32_t modifiers, bool down) {
     if (!gPortFreeCamera) return false;
     const int which = PortFreeKeyOf(key);
     if (which < 0) return false;
     if (!down) return PortFreeLetGoKey(which);
     if ((gFirstPersonFlags & kFirstPersonAny) != 0 || (modifiers & 0xc) != 0) return false;
+    if (modifiers != 0 && gPortFreeTableKey != nullptr && gPortFreeTableKey(key, modifiers)) return false;
     if (which == kPortFreeTab) {
         // The game's own key repeat sends more key downs: only the first toggles.
         if ((gPortFree.held & (1u << kPortFreeTab)) == 0) {
@@ -367,4 +374,5 @@ void PortFreeHookDragMove(float dx, float dy);
 bool PortFreeHookDragGoing();
 void PortFreeHookDragEnd();
 void PortFreeHookPinch(float scale);
+bool PortFreeHookTableKey(int32_t key, int32_t modifiers);
 
