@@ -228,7 +228,7 @@ inline std::string ModKey(const std::string& id) { return "mod." + id; }
 // data is in the data folder.
 struct GameDataRow {
     std::string name;     // "Sim Theme Park"
-    std::string tag;      // what it is, beside the name: "US edition"
+    std::string tag;      // what it is, beside the name (under it where the name leaves no room): "US edition"
     bool unlocked = false;
     float fraction = 0;   // how much of it is there, for the badge: 0 none (a lock), 1 all (a check)
     std::string line;     // unlocked: what is there ("Mac release, 1,683 files confirmed"); locked: how to unlock it
@@ -344,6 +344,8 @@ public:
     bool GameDataInHeader() const { return gameDataInHeader_; }
     Rect GameDataBoxRect() const { return gameDataOpen_ ? gameDataBoxRect_ : Rect{}; }
     Rect GameDataSettingsRect() const { return gameDataOpen_ ? gameDataSettingsRect_ : Rect{}; }
+    // Where the last frame drew the notice at the window's bottom, in points (empty when none showed).
+    Rect NoticeRect() const { return noticeRect_; }
     void ArmRemove(assets::Edition edition);
     void ShowNotice(const std::string& message, bool problem);
     // Play's edition switch and Gold Edition toggle, as if clicked (the toggle's state is kept in launcher.ini, GoldKey).
@@ -654,6 +656,7 @@ private:
     bool gameDataReturn_ = false;
     bool gameDataInHeader_ = false;   // this frame's homes have the button in the header (a wide enough window)
     Rect gameDataButtonRect_, gameDataBoxRect_, gameDataSettingsRect_;
+    Rect noticeRect_;   // last frame's (NoticeRect)
 
     // The Game options section (SetGameSettings): the files as last read, the edition and the player they are read for
     // (empty player: the last one played), and the last frame's rects.
