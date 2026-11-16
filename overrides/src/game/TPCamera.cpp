@@ -516,11 +516,19 @@ void InitCamera() {
     std::memset(gCameraF5BB4, 0, sizeof gCameraF5BB4);
     gCameraF5AAC = 1;
     gFirstPersonFlags = 0;
+    // TPW_PORT_FIX freecam InitCamera | Mac: (none) | Port: a new park's camera starts in the orbit at the original's tilt (fly mode ends) | Why: the Free camera's state belongs to the park it was in
+    gPortFree.pitchTarget = -1.0f;
+    gPortFree.fly = gPortFree.flyWanted = false;
 }
 
 // The camera looks at a place: the velocity stops; each non-null input is copied. The listing tests the first pointer a second time
 // where it reads the second one (so a null z with a non-null x dereferences null, as on the Mac).
 void SetCameraPOI(float* x, float* z, float* zoom, float* yaw, float* value) {
+    // TPW_PORT_FIX freecam SetCameraPOI | Mac: (none) | Port: with gPortFreeCamera on, the camera sent to a place (the map, an advisor) leaves fly mode for the orbit there | Why: fly mode would otherwise put the place back where the eye looks
+    if (gPortFreeCamera && (gPortFree.fly || gPortFree.flyWanted)) {
+        gPortFree.fly = gPortFree.flyWanted = false;
+        PortFreeLetGoAll();
+    }
     gCameraF5BB4[0] = 0.0f;
     gCameraF5BB4[1] = 0.0f;
     gCameraF5BB4[2] = 0.0f;
@@ -1004,11 +1012,145 @@ void PortFreeOrbitInput(float dt) {
     PortFreeClearPending();
 }
 
+// The map's size in world units (0 for none).
+void PortFreeMapSize(float& width, float& depth) {
+    const sHField* field = gHeightfieldHeader != nullptr ? static_cast<const sHField*>(gHeightfieldHeader->mHField) : nullptr;
+    width = field != nullptr ? field->mF08[2] * static_cast<float>(field->mF18[0]) : 0.0f;
+    depth = field != nullptr ? field->mF08[3] * static_cast<float>(field->mF18[1]) : 0.0f;
+}
+
+// The orbit camera that looks where the flying eye looks: the target is where the view meets the ground under the eye
+// (within the zoom limits, on the map), the zoom its distance, the tilt the view's (within the orbit's limits), the yaw the
+// view's. Ending the flight leaves the orbit there; first person and a save take the target and the yaw from it meanwhile.
+void PortFreeOrbitFromEye() {
+    const float* eye = gPortFree.eye;
+    const float pitch = PortFreeClampPitch(gPortFree.flyPitch);
+    const float ground = DetermineHFieldHeight(eye[0], eye[2], 1);
+    float distance = kPortFreeZoomOut;
+    if (gPortFree.flyPitch > kPortFreePitchLow) distance = (eye[1] - ground) / std::sin(gPortFree.flyPitch);
+    distance = std::fmin(std::fmax(distance, kPortFreeZoomIn), kPortFreeZoomOut);
+    float width = 0.0f;
+    float depth = 0.0f;
+    PortFreeMapSize(width, depth);
+    const float across = distance * std::cos(pitch);
+    gCameraPosition[0] = std::fmin(std::fmax(eye[0] + across * std::sin(gPortFree.flyYaw), 0.0f), width);
+    gCameraPosition[2] = std::fmin(std::fmax(eye[2] + across * std::cos(gPortFree.flyYaw), 0.0f), depth);
+    std::memcpy(gCameraTarget, gCameraPosition, sizeof gCameraTarget);
+    gCameraF68 = distance;
+    gCameraF5BF4 = gPortFree.flyYaw;
+    gCameraYaw = gPortFree.flyYaw;
+    gPortFree.pitchTarget = pitch;
+}
+
+// TPW_PORT_FIX freecam PortFreeFlyFrame | Mac: (none) | Port: with gPortFreeCamera on, fly mode (Tab starts and ends it, Home and first person end it): the eye moves along the view with W and S (the up and down arrows, keypad 8 and 2, the wheel, a pinch), sideways with A and D (keypad 4 and 6), up and down with E and Q (Page Up and Page Down); the view turns with the right, middle and Option drags, a swipe, Z and X and the left and right arrows; Shift faster, Option slower; the eye stays above the ground unless "Fly through the ground" is on, near the map and below kPortFreeFlyCeiling; the camera matrix is built from the eye as HandleCamera's end builds it, without the first-person flags (so nothing online moves); true when the frame was fly mode's | Why: the Free camera's fly mode, as SPEC asks
+bool PortFreeFlyFrame(float dt) {
+    if ((gFirstPersonFlags & kFirstPersonAny) != 0) {
+        if (gPortFree.fly || gPortFree.flyWanted) {
+            gPortFree.fly = gPortFree.flyWanted = false;
+            PortFreeLetGoAll();
+        }
+        return false;
+    }
+    if (gPortFree.flyWanted && !gPortFree.fly) {
+        gPortFree.fly = true;
+        gPortFree.eye[0] = gCameraMatrix.m[3][0];
+        gPortFree.eye[1] = gCameraMatrix.m[3][1];
+        gPortFree.eye[2] = gCameraMatrix.m[3][2];
+        gPortFree.flyPitch = gPortFree.flyPitchTarget = gCameraPitch;
+        gPortFree.flyYaw = gPortFree.flyYawTarget = gCameraYaw;
+        gPortFree.flyVelocity[0] = gPortFree.flyVelocity[1] = gPortFree.flyVelocity[2] = 0.0f;
+        gPortFree.flyAhead = 0.0f;
+        gCameraF5BB4[0] = gCameraF5BB4[1] = gCameraF5BB4[2] = 0.0f;
+        gCameraTilt[0] = gCameraTilt[1] = 0.0f;
+    } else if (!gPortFree.flyWanted && gPortFree.fly) {
+        gPortFree.fly = false;
+        PortFreeOrbitFromEye();
+        gCameraPitch = gPortFree.pitchTarget;
+        gCameraGroundHeight = DetermineHFieldHeight(gCameraTarget[0], gCameraTarget[2], 1);
+        PortFreeClearPending();
+        return false;
+    }
+    if (!gPortFree.fly) return false;
+
+    const float factor = PortFreeSpeedFactor(PortFreeModifiersNow());
+    const uint32_t held = gPortFree.held;
+    auto down = [held](int which) { return (held & (1u << which)) != 0; };
+    const uint32_t mode = gCameraModeA;
+    // The view.
+    const float invert = gPortFreeInvertLook ? -1.0f : 1.0f;
+    float turn = 0.0f;
+    if (mode & 8) turn += 1.0f;
+    if (mode & 0x10) turn -= 1.0f;
+    gPortFree.flyYawTarget += gPortFree.dYaw + turn * kPortFreeFlyTurnRate * dt * factor;
+    float tilt = 0.0f;
+    if (down(kPortFreeZ)) tilt -= 1.0f;
+    if (down(kPortFreeX)) tilt += 1.0f;
+    gPortFree.flyPitchTarget += gPortFree.dPitch + tilt * kPortFreeTiltRate * dt * factor * invert;
+    gPortFree.flyPitchTarget = std::fmin(std::fmax(gPortFree.flyPitchTarget, kPortFreeFlyPitchUp), kPortFreePitchHigh);
+    gPortFree.flyYaw = PortFreeEase(gPortFree.flyYaw, gPortFree.flyYawTarget, dt);
+    gPortFree.flyPitch = PortFreeEase(gPortFree.flyPitch, gPortFree.flyPitchTarget, dt);
+    SetLMatrixOrientationHi(&gCameraMatrix, gPortFree.flyPitch, gPortFree.flyYaw);
+
+    // The move: forward along the matrix's third row, sideways along its first, up the world's.
+    float forward = 0.0f;
+    float right = 0.0f;
+    float up = 0.0f;
+    if (down(kPortFreeW) || (mode & 0x20) || Key(0xd)) forward += 1.0f;
+    if (down(kPortFreeS) || (mode & 0x40) || Key(0xe)) forward -= 1.0f;
+    if (down(kPortFreeD) || Key(0x10)) right += 1.0f;
+    if (down(kPortFreeA) || Key(0xf)) right -= 1.0f;
+    if (down(kPortFreeE) || down(kPortFreePgUp)) up += 1.0f;
+    if (down(kPortFreeQ) || down(kPortFreePgDn)) up -= 1.0f;
+    const float ahead[3] = {gCameraMatrix.m[2][0], gCameraMatrix.m[2][1], gCameraMatrix.m[2][2]};
+    const float side[3] = {gCameraMatrix.m[0][0], gCameraMatrix.m[0][1], gCameraMatrix.m[0][2]};
+    float move[3];
+    PortFreeFlyMove(ahead, side, forward, right, up, kPortFreeFlySpeed * gPortFreeFlySpeed * gPortFree.flySpeedLive * factor, dt, move);
+    float width = 0.0f;
+    float depth = 0.0f;
+    PortFreeMapSize(width, depth);
+    float* eye = gPortFree.eye;
+    eye[0] = std::fmin(std::fmax(eye[0] + move[0], -kPortFreeFlyMapMargin), width + kPortFreeFlyMapMargin);
+    eye[1] = std::fmin(eye[1] + move[1], kPortFreeFlyCeiling);
+    eye[2] = std::fmin(std::fmax(eye[2] + move[2], -kPortFreeFlyMapMargin), depth + kPortFreeFlyMapMargin);
+    if (!gPortFreeThroughGround) eye[1] = std::fmax(eye[1], DetermineHFieldHeight(eye[0], eye[2], 1) + kPortFreeGroundMargin);
+    PortFreeClearPending();
+
+    // The matrix, as HandleCamera's end loads it.
+    gCameraMatrix.m[3][0] = gCameraViewPoint.x = eye[0];
+    gCameraMatrix.m[3][1] = gCameraViewPoint.y = eye[1];
+    gCameraMatrix.m[3][2] = gCameraViewPoint.z = eye[2];
+    gei_ViewMatrix->Load(gCameraMatrix);
+    gCurrentCameraMatrix = &gCameraMatrix;
+    std::memcpy(&gCameraMatrixB, &gCameraMatrix, sizeof(sMatrix));
+    InvertMatrix(&gInverseCameraMatrix, gCurrentCameraMatrix);
+    PortFreeOrbitFromEye();
+    return true;
+}
+
+// TPW_PORT_FIX freecam PortFreeLowViewFrame | Mac: (none) | Port: with gPortFreeCamera on, outside first person, a view lower than kPortFreeLowEnter (25 degrees, back above kPortFreeLowLeave, 30) is a low view: gPortFreeLowView draws it as first person is drawn, and the visitors switch to their first-person sprites (back to the others above 30 degrees; first person's own switches are left alone); in first person, and with no park, no low view | Why: drawing at low angles, as SPEC asks
+void PortFreeLowViewFrame(bool park) {
+    const bool firstPerson = (gFirstPersonFlags & kFirstPersonAny) != 0;
+    const float pitch = gPortFree.fly ? gPortFree.flyPitch : gCameraPitch;
+    const bool low = park && !firstPerson && PortFreeLowViewAt(pitch, gPortFree.lowView);
+    if (low != gPortFree.lowView) {
+        gPortFree.lowView = low;
+        if (!firstPerson) {
+            if (low) ESP_SwitchToFirstPersonSprites();
+            else ESP_SwitchToThirdPersonSprites();
+        }
+    }
+    gPortFreeLowView = low;
+}
+
 }  // namespace
 
 void HandleCamera() {
     const uint32_t isometric = static_cast<uint8_t>(gPlayerSettings.mCurrent.mIsometricOn);
-    if (HandleExternalCamera()) return;
+    // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: with gPortFreeCamera on, no low view outside the park (PortFreeLowViewFrame) | Why: the lobby is never drawn as a low view
+    if (HandleExternalCamera()) {
+        if (gPortFreeCamera) PortFreeLowViewFrame(false);
+        return;
+    }
 
     const uint32_t now = static_cast<uint32_t>(gClock.ReadFixed());
     bool firstFrame = false;
@@ -1081,12 +1223,24 @@ void HandleCamera() {
         std::memcpy(gCameraPosition, gCameraStartPosition, sizeof gCameraPosition);
         gCameraModeA &= ~0x100u;
         gFirstPersonFlags &= ~0x1000u;
-        // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: the reset also puts the free camera's tilt back to the original's for the home zoom | Why: Home resets the Free camera, as SPEC asks
+        // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: the reset also puts the free camera's tilt back to the original's for the home zoom, and ends fly mode | Why: Home resets the Free camera, and returns from fly mode to the orbit, as SPEC asks
         gPortFree.pitchTarget = -1.0f;
+        if (gPortFree.fly || gPortFree.flyWanted) {
+            gPortFree.fly = gPortFree.flyWanted = false;
+            PortFreeLetGoAll();
+            PortFreeClearPending();
+        }
     }
     gCameraModeB = gCameraModeA;
-    // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: with gPortFreeCamera on, the free camera's input for this frame (PortFreeOrbitInput) | Why: the Free camera's orbit, as SPEC asks; with the setting off nothing runs
-    if (gPortFreeCamera) PortFreeOrbitInput(dt);
+    // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: with gPortFreeCamera on, fly mode's frame (PortFreeFlyFrame), which builds the camera itself, or else the free camera's input for this frame (PortFreeOrbitInput) | Why: the Free camera's orbit and fly mode, as SPEC asks; with the setting off nothing runs
+    if (gPortFreeCamera) {
+        if (PortFreeFlyFrame(dt)) {
+            gCameraClockStamp = now;
+            PortFreeLowViewFrame(true);
+            return;
+        }
+        PortFreeOrbitInput(dt);
+    }
 
     // The pointer's offset from the middle of the game window, in half windows (up is positive).
     float f28 = (gPointerScreenXY[0] - gGameWindowCentreX) / gGameWindowHalfWidth;
@@ -1441,10 +1595,27 @@ void HandleCamera() {
     std::memcpy(&gCameraMatrixB, &gCameraMatrix, sizeof(sMatrix));
     gCameraClockStamp = now;
     InvertMatrix(&gInverseCameraMatrix, gCurrentCameraMatrix);
+    // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: with gPortFreeCamera on, the low view for this frame (PortFreeLowViewFrame) | Why: drawing at low angles, as SPEC asks
+    if (gPortFreeCamera) PortFreeLowViewFrame(true);
 }
 
 int32_t SaveCamera(void* file) {
     uint32_t count = 0;
+    // TPW_PORT_FIX freecam SaveCamera | Mac: the zoom and the key yaw are written as they are | Port: with gPortFreeCamera on, the zoom is written within the original's 70 to 130 and, with Isometric on, the key yaw at its nearest quarter turn (PortFreeSaveZoom, PortFreeIsoYaw); both are put back after | Why: a save made with the Free camera loads in the original unchanged, as SPEC asks
+    struct PutBack {
+        bool on;
+        float zoom;
+        float yaw;
+        ~PutBack() {
+            if (!on) return;
+            gCameraF68 = zoom;
+            gCameraF5BF4 = yaw;
+        }
+    } putBack{gPortFreeCamera, gCameraF68, gCameraF5BF4};
+    if (gPortFreeCamera) {
+        gCameraF68 = PortFreeSaveZoom(gCameraF68);
+        if (gPlayerSettings.mCurrent.mIsometricOn) gCameraF5BF4 = PortFreeIsoYaw(gCameraF5BF4);
+    }
     SwapWords(&gCameraF68, 1);
     LbFile_Write(file, &gCameraF68, 4, &count);
     SwapWords(&gCameraF68, 1);
@@ -1529,6 +1700,12 @@ int32_t LoadCamera(void* file) {
     }
     SwapWords(&gCameraSavedYaw, 1);
     gFirstPersonFlags = 0;
+    // TPW_PORT_FIX freecam LoadCamera | Mac: (none) | Port: a loaded park starts in the orbit at the original's tilt for its zoom (with gPortFreeCamera on: fly mode ends) | Why: the Free camera's state belongs to the park it was in
+    if (gPortFreeCamera) {
+        gPortFree.pitchTarget = -1.0f;
+        gPortFree.fly = gPortFree.flyWanted = false;
+        PortFreeClearPending();
+    }
     gCameraYaw = gCameraF5BF4;
     if (gPlayerSettings.mCurrent.mIsometricOn) {
         const float f = static_cast<float>(std::fmod(static_cast<double>(gCameraF5BF4), kHalfPiD_2));
