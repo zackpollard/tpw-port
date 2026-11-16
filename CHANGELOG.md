@@ -4,23 +4,24 @@
 
 ### New Features
 
-- In the TPI Worlds and Rides mod's Land of Invention, The Great Lake is now a real boating lake: it can only be built with its back on the lake's water (buy the land by the lake first), and its boats sail out onto the lake with their wake on the water, then come back to let their riders off, who stay seated so you can ride along in first person; a Great Lake built away from the water in an older park keeps its boats on its own plot
+- In the SimCoaster/TPI - New Worlds, Rides and Sprites mod's Land of Invention, The Great Lake is now a real boating lake: it can only be built with its back on the lake's water (buy the land by the lake first), and its boats sail out onto the lake with their wake on the water, then come back to let their riders off, who stay seated so you can ride along in first person; a Great Lake built away from the water in an older park keeps its boats on its own plot
 - A new Free camera setting (off by default) lets you tilt the camera from straight down to level with the horizon and zoom from close to the ground out over the whole park: Q and E turn, Z and X tilt, Page Up and Page Down zoom, a middle-button or Option/Alt drag turns and tilts, and on a trackpad two fingers move the camera and a pinch zooms (or, with Two-finger swipe set to Zooms and rotates, swipes zoom and rotate)
 - With Free camera on, Tab switches to flying: W A S D move the camera the way it looks, the right button held looks around, the wheel moves forward and back, Shift goes faster and Alt slower, and Home goes back to the normal camera. Invert vertical look, Look sensitivity, Fly speed, Smoothing and Fly through the ground are set under Free camera in Settings
 - With Free camera on, a gamepad moves the camera too: the left stick moves the camera (or flies), the right stick turns and tilts it (or looks around), the right and left triggers zoom in and out (or rise and sink), the bumpers turn it, the top face button (Y on Xbox, triangle on PlayStation) switches to flying and back, and View (Back, Share or Select) goes back to the normal camera. Xbox, PlayStation, Switch and most other pads work, plugged in before or while you play, and Look sensitivity, Invert vertical look and Fly speed apply to it. The Gamepad switch under Free camera in Settings turns it off
 
 ### Bug Fixes
 
-- Fixed the game freezing when land was bought in a TPI Worlds and Rides mod park whose fence crosses a bridge or tunnel, such as the land by the Arabian Nights bridge: 0.5.5 broke the fence where it crosses them when the park was loaded, and parks saved since then get the fence back when they are loaded
-- Fixed the game crashing when you point at certain fence cells over the tunnels in the TPI Worlds and Rides mod's Polar Zone and Arabian Nights parks loaded with 0.5.5
+- Fixed the game freezing when land was bought in a SimCoaster/TPI - New Worlds, Rides and Sprites mod park whose fence crosses a bridge or tunnel, such as the land by the Arabian Nights bridge: 0.5.5 broke the fence where it crosses them when the park was loaded, and parks saved since then get the fence back when they are loaded
+- Fixed the game crashing when you point at certain fence cells over the tunnels in the SimCoaster/TPI - New Worlds, Rides and Sprites mod's Polar Zone and Arabian Nights parks loaded with 0.5.5
 - On a Mac, the launcher's Update button now updates the launcher and the game when the launcher is opened from Applications, instead of opening the release page (Thanks slappyhead)
 - In full screen, the pointer now stays on the game's screen instead of moving off onto another screen beside it (Thanks BMCTV)
-- Fixed the swamp in the TPI Worlds and Rides mod's Polar Zone not showing at all: it now lies in the ground in the northwest corner as in Theme Park Inc, nothing can be built on it, and it clears once your park buys the land beside it
-- Fixed snow counting as rain for visitors in the TPI Worlds and Rides mod's worlds: in snow, kids now cheer up while parents and grandparents lose more happiness than in rain, and everyone gets less thirsty and hungrier, as in Theme Park Inc
+- Fixed the swamp in the SimCoaster/TPI - New Worlds, Rides and Sprites mod's Polar Zone not showing at all: it now lies in the ground in the northwest corner as in SimCoaster AKA Theme Park Inc, nothing can be built on it, and it clears once your park buys the land beside it
+- Fixed snow counting as rain for visitors in the SimCoaster/TPI - New Worlds, Rides and Sprites mod's worlds: in snow, kids now cheer up while parents and grandparents lose more happiness than in rain, and everyone gets less thirsty and hungrier, as in SimCoaster AKA Theme Park Inc
 
 ### Changes
 
 - Updated SDL, which the launcher and the game use for the window, sound, mouse and keyboard, to version 3.4.20
+- The mod that adds the three worlds is now called SimCoaster/TPI - New Worlds, Rides and Sprites, and the launcher, the mod's description and the READMEs now name the game they come from SimCoaster AKA Theme Park Inc
 
 ## 0.5.5 (2026-11-14)
 
