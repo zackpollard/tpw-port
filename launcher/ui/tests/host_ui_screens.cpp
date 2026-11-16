@@ -661,11 +661,18 @@ void Render(const std::string& dir, const Shot& shot, int scale) {
         auto frames = [&](int n) {
             for (int i = 0; i < n; ++i) step(kDt);
         };
+        // Every frame but the last is drawn into a one-pixel viewport: the software renderer then clips each triangle
+        // and blit to it, so those frames cost their layout and almost no drawing. The launcher never sets the viewport,
+        // and each frame clears and draws the whole window again, so the last frame's picture is the same.
+        const SDL_Rect pixel{0, 0, 1, 1};
+        SDL_SetRenderViewport(renderer, &pixel);
         frames(1);
         if (shot.drive) shot.drive(ui, backend, frames);
-        // Let the springs settle: two seconds in long steps (the springs integrate in small ones of their own), as
-        // every frame costs a full software drawing.
-        for (int i = 0; i < 20; ++i) step(0.1f);
+        // Let the springs settle: two seconds in long steps (the springs integrate in small ones of their own).
+        for (int i = 0; i < 20; ++i) {
+            if (i == 19) SDL_SetRenderViewport(renderer, nullptr);
+            step(0.1f);
+        }
         Check(ui.CurrentScreen() == shot.screen, label + ": not on the expected screen");
         Check(SDL_FlushRenderer(renderer), label + ": SDL_FlushRenderer: " + SDL_GetError());
         SDL_Surface* rgb = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGB24);
