@@ -45,6 +45,7 @@
 #include "ui_main.h"
 #include "UIInterface.h"
 #include "World.h"
+#include "PortFreeCamera.h"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -471,7 +472,8 @@ void Will_HandleCameraMessages(int32_t message, int32_t a, int32_t b) {
     case kMsgFrame:
         // With the middle button held the key yaw turns by the pointer's place across the screen: x / width - 0.5 radians
         // a frame (0 in the middle), worked as (2048 x / width - 1024) / 2048 with one fused multiply-add.
-        if ((gCameraModeA & 2) != 0) {
+        // TPW_PORT_FIX freecam Will_HandleCameraMessages | Mac: the middle button turns the view by the pointer's place across the screen | Port: with gPortFreeCamera on, not here: the run loop's drag turns it by how far the mouse moves (include/PortFreeCamera.h) | Why: the Free camera's middle button turns by the drag, as SPEC asks; with the setting off the Mac's turn
+        if ((gCameraModeA & 2) != 0 && !gPortFreeCamera) {
             // TPW_PORT_FIX v5L26 Will_HandleCameraMessages | Mac: the middle of the screen is unit 1024 | Port: the middle of the unit space (1024 on a 4:3 screen) | Why: a widescreen port; on a wider screen the middle-button turn stands still with the pointer in the middle instead of drifting
             const float across = (2048.0f * gPointerScreenXY[0]) / FromInt(width) - static_cast<float>(gUIUnitWidth / 2);
             gCameraF5BF4 = ppc_fmadds(gCameraYawDragScale * PortFrameScale(gCameraDragPace), across, gCameraF5BF4);
@@ -933,10 +935,15 @@ void WheelZoom(float dt) {
     }
     if ((gCameraModeA & 0x80) != 0) {
         const bool wide = (gCameraModeA & 0x200) != 0;
-        const float low = wide ? Bits(0x42200000u) : Bits(0x428c0000u);
+        float low = wide ? Bits(0x42200000u) : Bits(0x428c0000u);
         // The target's far limit is HandleCamera's (TPW_PORT_FIX farzoom there), kPortFarZoomOut with "Zoom out further" on, so
         // the smooth wheel zoom reaches the same limit. as the step and the keys
-        const float high = wide ? Bits(0x43960000u) : gPortFarZoom ? kPortFarZoomOut : Bits(0x43020000u);
+        float high = wide ? Bits(0x43960000u) : gPortFarZoom ? kPortFarZoomOut : Bits(0x43020000u);
+        // TPW_PORT_FIX freecam WheelZoom | Mac: (none) | Port: with gPortFreeCamera on, HandleCamera's free zoom limits (25 to 300) | Why: the smooth wheel zoom reaches the free camera's limits
+        if (gPortFreeCamera) {
+            low = kPortFreeZoomIn;
+            high = kPortFreeZoomOut;
+        }
         gWheelZoomTarget = gWheelZoomTarget < low ? low : gWheelZoomTarget > high ? high : gWheelZoomTarget;
     }
     const float before = gCameraF68;
@@ -962,6 +969,39 @@ void WheelZoom(float dt) {
     const float z = gCameraPosition[2] + dz * share;
     gCameraPosition[0] = std::fmax(std::fmin(x, std::fmax(width, gCameraPosition[0])), std::fmin(0.0f, gCameraPosition[0]));
     gCameraPosition[2] = std::fmax(std::fmin(z, std::fmax(depth, gCameraPosition[2])), std::fmin(0.0f, gCameraPosition[2]));
+}
+
+// TPW_PORT_FIX freecam PortFreeOrbitInput | Mac: (none) | Port: with gPortFreeCamera on, one frame of dt ms of the free camera's input in the park view: Z and X move the tilt's target (toward the horizon, toward straight down; Shift faster, Option slower), and what the wheel, the drags and the pinch asked for since the last frame turns the key yaw, tilts, zooms and moves the target along the view's ground directions (kept on the map as the wheel zoom keeps it); with Smoothing off the yaw goes to the key yaw at once; in first person the input is dropped | Why: the Free camera's orbit, as SPEC asks
+void PortFreeOrbitInput(float dt) {
+    if ((gFirstPersonFlags & kFirstPersonAny) != 0) {
+        PortFreeClearPending();
+        return;
+    }
+    if (gPortFree.pitchTarget < 0.0f) {
+        gPortFree.pitchTarget = PortFreeFormulaPitch(gCameraF68);
+        gCameraPitch = gPortFree.pitchTarget;
+    }
+    const float tilt = kPortFreeTiltRate * dt * PortFreeSpeedFactor(PortFreeModifiersNow());
+    if ((gPortFree.held & (1u << kPortFreeZ)) != 0) gPortFree.pitchTarget -= tilt;
+    if ((gPortFree.held & (1u << kPortFreeX)) != 0) gPortFree.pitchTarget += tilt;
+    gPortFree.pitchTarget = PortFreeClampPitch(gPortFree.pitchTarget + gPortFree.dPitch);
+    gCameraF5BF4 = gCameraF5BF4 + gPortFree.dYaw;
+    if (gPortFree.zoomScale != 1.0f || gPortFree.dZoom != 0.0f) gCameraF68 = gCameraF68 * gPortFree.zoomScale + gPortFree.dZoom;
+    const sHField* field = gHeightfieldHeader != nullptr ? static_cast<const sHField*>(gHeightfieldHeader->mHField) : nullptr;
+    if ((gPortFree.dForward != 0.0f || gPortFree.dRight != 0.0f) && field != nullptr) {
+        const float s = std::sin(gCameraYaw);
+        const float c = std::cos(gCameraYaw);
+        const float f = gPortFree.dForward * gCameraF68;
+        const float r = gPortFree.dRight * gCameraF68;
+        const float width = field->mF08[2] * static_cast<float>(field->mF18[0]);
+        const float depth = field->mF08[3] * static_cast<float>(field->mF18[1]);
+        const float x = gCameraPosition[0] + f * s + r * c;
+        const float z = gCameraPosition[2] + f * c - r * s;
+        gCameraPosition[0] = std::fmax(std::fmin(x, std::fmax(width, gCameraPosition[0])), std::fmin(0.0f, gCameraPosition[0]));
+        gCameraPosition[2] = std::fmax(std::fmin(z, std::fmax(depth, gCameraPosition[2])), std::fmin(0.0f, gCameraPosition[2]));
+    }
+    if (!gPortFreeSmoothing) gCameraYaw = gCameraF5BF4;
+    PortFreeClearPending();
 }
 
 }  // namespace
@@ -1041,8 +1081,12 @@ void HandleCamera() {
         std::memcpy(gCameraPosition, gCameraStartPosition, sizeof gCameraPosition);
         gCameraModeA &= ~0x100u;
         gFirstPersonFlags &= ~0x1000u;
+        // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: the reset also puts the free camera's tilt back to the original's for the home zoom | Why: Home resets the Free camera, as SPEC asks
+        gPortFree.pitchTarget = -1.0f;
     }
     gCameraModeB = gCameraModeA;
+    // TPW_PORT_FIX freecam HandleCamera | Mac: (none) | Port: with gPortFreeCamera on, the free camera's input for this frame (PortFreeOrbitInput) | Why: the Free camera's orbit, as SPEC asks; with the setting off nothing runs
+    if (gPortFreeCamera) PortFreeOrbitInput(dt);
 
     // The pointer's offset from the middle of the game window, in half windows (up is positive).
     float f28 = (gPointerScreenXY[0] - gGameWindowCentreX) / gGameWindowHalfWidth;
@@ -1252,6 +1296,11 @@ void HandleCamera() {
             gCameraWideZoomMax = Bits(0x43960000u);
             gCameraWideZoomMaxOnce = 1;
         }
+        // TPW_PORT_FIX freecam HandleCamera | Mac: the park view's zoom is kept within 70 and 130 (40 and 300 with the hidden full zoom out) | Port: with gPortFreeCamera on, within kPortFreeZoomIn (25) and kPortFreeZoomOut (300), whatever the hidden mode | Why: the Free camera zooms further in and out, as SPEC asks
+        if (gPortFreeCamera) {
+            if (gCameraF68 < kPortFreeZoomIn) gCameraF68 = kPortFreeZoomIn;
+            else if (gCameraF68 > kPortFreeZoomOut) gCameraF68 = kPortFreeZoomOut;
+        } else
         if ((gCameraModeA & 0x200) != 0) {
             if (gCameraF68 < gCameraWideZoomMin) gCameraF68 = gCameraWideZoomMin;
             else if (gCameraF68 > gCameraWideZoomMax) gCameraF68 = gCameraWideZoomMax;
@@ -1289,9 +1338,14 @@ void HandleCamera() {
         gCameraViewPoint.z = -gCameraF68;
         const float f4 = gCameraF68 - Bits(0x428c0000u);
         const float t = f4 / Bits(0x42700000u);
+        // TPW_PORT_FIX freecam HandleCamera | Mac: the tilt comes from the zoom (a quarter turn's half at 70, 1.134464 at 130) | Port: with gPortFreeCamera on, the tilt eases to its own target (PortFreeOrbitInput) as the yaw eases | Why: the Free camera's tilt is free and no longer tied to the zoom, as SPEC asks
+        if (gPortFreeCamera) {
+            gCameraPitch = PortFreeEase(gCameraPitch, gPortFree.pitchTarget, dt);
+        } else {
         gCameraPitch = ppc_fmadds(kQuarterPi, 1.0f - t, kOneAndAHalfPitch * t);
         gCameraPitch = gCameraPitch >= gCameraPitchMin ? gCameraPitch : gCameraPitchMin;
         gCameraPitch = gCameraPitchMax >= gCameraPitch ? gCameraPitch : gCameraPitchMax;
+        }
         const float s = static_cast<float>(std::sin(static_cast<double>(gCameraPitch)));
         const float c = static_cast<float>(std::cos(static_cast<double>(gCameraPitch)));
         const float y = gCameraViewPoint.y;
@@ -1305,6 +1359,16 @@ void HandleCamera() {
             gCameraGroundHeight = (gCameraGroundHeight + ground * ((1.0f - keep) / keep)) * keep;
         }
         gCameraViewPoint.y = gCameraViewPoint.y + gCameraGroundHeight;
+        // TPW_PORT_FIX freecam HandleCamera | Mac: (none: its tilts never bring the eye near the ground) | Port: with gPortFreeCamera on, the tilt rises as far as it must to keep the eye kPortFreeGroundMargin above the ground under it (PortFreeFloorPitch), and the view point is worked again with it | Why: the Free camera never goes below the ground, as SPEC asks
+        if (gPortFreeCamera) {
+            const float floor = PortFreeFloorPitch(gCameraPitch, gCameraYaw, gCameraF68, gCameraTarget[0], gCameraGroundHeight + gCameraTarget[1],
+                                                   gCameraTarget[2], [](float gx, float gz) { return DetermineHFieldHeight(gx, gz, 1); });
+            if (floor > gCameraPitch) {
+                gCameraPitch = floor;
+                gCameraViewPoint.y = gCameraF68 * std::sin(floor) + gCameraGroundHeight;
+                gCameraViewPoint.z = -(gCameraF68 * std::cos(floor));
+            }
+        }
         // The tilt from the velocity: the square root of its size, scaled.
         if (vel[0] < 0.0f) {
             const float root = static_cast<float>(std::sqrt(100.0 * static_cast<double>(-vel[0])));
