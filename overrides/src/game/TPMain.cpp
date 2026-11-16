@@ -328,9 +328,10 @@ bool PortFreeHookWheel(float x, float y, bool fractional, uint16_t macModifiers,
 }
 
 int PortFreeHookDragStart(int button, uint16_t macModifiers) {
-    if (!PortFreeDragStart(button, PortFreeGameModifiers(macModifiers), PortFreeOverPark())) return 0;
+    const int taken = PortFreeDragStart(button, PortFreeGameModifiers(macModifiers), PortFreeOverPark());
+    if (taken == 0) return 0;
     sFreeDragPanel = gUIPanelWindow;
-    return 1;
+    return taken;
 }
 
 void PortFreeHookDragMove(float dx, float dy) { PortFreeDragMove(dx, dy); }

@@ -37,6 +37,21 @@ inline constexpr float kPortFreeSwipeMove = 0.02f;     // a swipe: the zoom's sh
 inline constexpr float kPortFreeSwipeZoom = 2.0f;      // a swipe in "Zooms and rotates": zoom units a unit
 inline constexpr float kPortFreePinchZoom = 0.85f;     // Ctrl + wheel: the zoom times this a unit up
 inline constexpr uint64_t kPortFreeFineMs = 300;       // a wheel event this soon after a fractional one is a trackpad's too
+// Fly mode: the eye looks from 85 degrees up to straight down, moves kPortFreeFlySpeed units a millisecond at Fly speed 1, a
+// notched wheel step moves it kPortFreeFlyWheelStep along the view, and it stays within kPortFreeFlyMapMargin of the map and
+// below kPortFreeFlyCeiling.
+inline constexpr float kPortFreeFlyPitchUp = -1.4835299f;
+inline constexpr float kPortFreeFlySpeed = 0.06f;
+inline constexpr float kPortFreeFlyTurnRate = 0.0015f;   // the left and right arrows: radians a millisecond
+inline constexpr float kPortFreeFlyWheelStep = 10.0f;
+inline constexpr float kPortFreeFlyPinchMove = 60.0f;    // a pinch: units along the view for a scale of e
+inline constexpr float kPortFreeFlyMapMargin = 150.0f;
+inline constexpr float kPortFreeFlyCeiling = 500.0f;
+inline constexpr float kPortFreeFlySpeedStep = 1.25f;    // right button + a wheel step: the fly speed times this
+// Low views: below kPortFreeLowEnter (25 degrees) the park is drawn as first person draws it (out to the View distance, with
+// fog, the visitors' first-person sprites), back above kPortFreeLowLeave (30 degrees).
+inline constexpr float kPortFreeLowEnter = 0.43633232f;
+inline constexpr float kPortFreeLowLeave = 0.52359878f;
 
 // Which key of the free camera's a key of the key tables is: the letters by their place on the keyboard (as W A S D,
 // include/port_wasd.h), Tab, Page Up and Page Down by their codes (the original's key table, platform/key_tables.inc, gives the
@@ -62,6 +77,18 @@ struct PortFreeCameraState {
     bool haveFine = false;   // a fractional wheel event was seen, at lastFineMs
     uint64_t lastFineMs = 0;
     int dragButton = -1;     // the button of the drag the run loop holds in relative mouse mode (0 left, 1 right, 2 middle)
+    // Fly mode. Tab sets flyWanted; HandleCamera starts and ends the flight (fly) from it.
+    bool flyWanted = false;
+    bool fly = false;
+    float eye[3] = {};       // the eye
+    float flyPitch = 0.0f;   // the view: down from the horizon (below 0 looks up), and the yaw as gCameraYaw
+    float flyYaw = 0.0f;
+    float flyPitchTarget = 0.0f;
+    float flyYawTarget = 0.0f;
+    float flyVelocity[3] = {};   // units a millisecond
+    float flyAhead = 0.0f;       // units still to move along the view (the wheel, the pinch)
+    float flySpeedLive = 1.0f;   // right button + wheel: the Fly speed setting times this, until the game quits
+    bool lowView = false;        // drawn as a low view (kPortFreeLowEnter, kPortFreeLowLeave)
 };
 inline PortFreeCameraState gPortFree;
 
@@ -114,6 +141,38 @@ inline float PortFreeFloorPitch(float pitch, float yaw, float zoom, float tx, fl
     return pitch;
 }
 
+// The low view's hysteresis: whether the view at this pitch is drawn as a low one, given whether the last frame's was.
+inline bool PortFreeLowViewAt(float pitch, bool wasLow) {
+    if (pitch < kPortFreeLowEnter) return true;
+    if (pitch > kPortFreeLowLeave) return false;
+    return wasLow;
+}
+
+// The zoom a save holds (the original's 70 to 130) and the key yaw it holds with Isometric on (the nearest quarter turn, as
+// the original's first isometric frame makes it).
+inline float PortFreeSaveZoom(float zoom) { return std::fmin(std::fmax(zoom, 70.0f), 130.0f); }
+inline float PortFreeIsoYaw(float yaw) {
+    const float quarter = 1.5707964f;
+    const float y = static_cast<float>(std::fmod(static_cast<double>(yaw), 1.5707963267948966));
+    if (!(y < 0.0f)) return y > 0.7853982f ? yaw + (quarter - y) : yaw - y;
+    return !(y < -0.7853982f) ? yaw - y : yaw - (quarter + y);
+}
+
+// One frame of fly mode's move, dt ms: the velocity (units a millisecond) eases toward the keys' wish, given as forward,
+// right and up shares (-1 to 1 each) along the view's forward and right rows and the world's up, at speed units a
+// millisecond; returns the move (velocity times dt plus the share of flyAhead taken this frame).
+inline void PortFreeFlyMove(const float forward[3], const float right[3], float wantForward, float wantRight, float wantUp,
+                            float speed, float dt, float move[3]) {
+    float want[3];
+    for (int i = 0; i < 3; ++i) want[i] = (wantForward * forward[i] + wantRight * right[i]) * speed;
+    want[1] += wantUp * speed;
+    for (int i = 0; i < 3; ++i) gPortFree.flyVelocity[i] = PortFreeEase(gPortFree.flyVelocity[i], want[i], dt);
+    const float aheadLeft = PortFreeEase(gPortFree.flyAhead, 0.0f, dt);
+    const float ahead = gPortFree.flyAhead - aheadLeft;
+    gPortFree.flyAhead = aheadLeft;
+    for (int i = 0; i < 3; ++i) move[i] = gPortFree.flyVelocity[i] * dt + ahead * forward[i];
+}
+
 // ---- keys
 
 inline int PortFreeKeyOf(int32_t key) {
@@ -143,14 +202,33 @@ inline bool PortFreeLetGoKey(int which) {
 inline void PortFreeLetGoAll() {
     for (int i = 0; i < kPortFreeKeyCount; ++i) PortFreeLetGoKey(i);
 }
+// Whether the free camera flies (or Tab has just asked it to): its keys, wheel and drags are fly mode's.
+inline bool PortFreeFlying() { return gPortFreeCamera && (gPortFree.flyWanted || gPortFree.fly); }
+// TPW_PORT_FIX freecam PortFreeHearsFromEye | Mac: (none: outside first person the ear is halfway to what the camera looks at) | Port: with gPortFreeCamera on and the camera flying, the ear is at the eye, as in first person (GameSys.cpp) | Why: sound heard from the eye in fly mode, as SPEC asks
+inline bool PortFreeHearsFromEye() { return gPortFreeCamera && gPortFree.fly; }
 
-// TPW_PORT_FIX freecam PortFreeCameraKey | Mac: (none) | Port: with gPortFreeCamera on, over the park (not in first person): Q and E press the camera table's turn keys (the left and right arrows, so the Isometric option's quarter-turn snap holds), Page Up and Page Down its zoom keys (the up arrow, zoom in, and the down arrow, zoom out), and Z and X tilt (held bits HandleCamera reads); Shift and Option may be held (faster, slower), Command and Control leave the key to the tables; the key up lets go of what its key down took; true when the key was taken | Why: the Free camera's keys, as SPEC asks
+// TPW_PORT_FIX freecam PortFreeCameraKey | Mac: (none) | Port: with gPortFreeCamera on, over the park (not in first person): Tab starts and ends fly mode; in the orbit, Q and E press the camera table's turn keys (the left and right arrows, so the Isometric option's quarter-turn snap holds), Page Up and Page Down its zoom keys (the up arrow, zoom in, and the down arrow, zoom out), and Z and X tilt (held bits HandleCamera reads); in fly mode W A S D, Q and E, Z and X, Page Up and Page Down are all held bits HandleCamera reads (W A S D whether or not "W A S D move the camera" is on); Shift and Option may be held (faster, slower), Command and Control leave the key to the tables; the key up lets go of what its key down took; true when the key was taken | Why: the Free camera's keys, as SPEC asks
 inline bool PortFreeCameraKey(int32_t key, int32_t modifiers, bool down) {
     if (!gPortFreeCamera) return false;
     const int which = PortFreeKeyOf(key);
     if (which < 0) return false;
     if (!down) return PortFreeLetGoKey(which);
     if ((gFirstPersonFlags & kFirstPersonAny) != 0 || (modifiers & 0xc) != 0) return false;
+    if (which == kPortFreeTab) {
+        // The game's own key repeat sends more key downs: only the first toggles.
+        if ((gPortFree.held & (1u << kPortFreeTab)) == 0) {
+            for (int i = 0; i < kPortFreeKeyCount; ++i) {
+                if (i != kPortFreeTab) PortFreeLetGoKey(i);
+            }
+            gPortFree.flyWanted = !PortFreeFlying();
+        }
+        gPortFree.held |= 1u << kPortFreeTab;
+        return true;
+    }
+    if (PortFreeFlying()) {   // every one of the keys is fly mode's: held bits HandleCamera reads
+        gPortFree.held |= 1u << which;
+        return true;
+    }
     switch (which) {
     case kPortFreeZ:
     case kPortFreeX:
@@ -190,7 +268,7 @@ inline void PortFreeStrayKeyUp(uint8_t macKeyCode) {
 
 // ---- the wheel, the drags, the pinch
 
-// TPW_PORT_FIX freecam PortFreeWheel | Mac: (none: a wheel step zooms by 10) | Port: with gPortFreeCamera on, over the park and not in first person: a trackpad (a fractional delta, or any wheel event within kPortFreeFineMs of one) moves the camera ("Moves the camera": up and down forward and back, sideways sideways) or zooms and turns ("Zooms and rotates"), and with Option tilts and turns; Control or Command with the wheel is a pinch (Windows' precision touchpads send their pinch so) and zooms; the deltas are SDL's as they come, which follow the system's natural scrolling; a notched wheel is not taken (the original's 10 a step); true when taken | Why: the Free camera's trackpad, as SPEC asks
+// TPW_PORT_FIX freecam PortFreeWheel | Mac: (none: a wheel step zooms by 10) | Port: with gPortFreeCamera on, over the park and not in first person: a trackpad (a fractional delta, or any wheel event within kPortFreeFineMs of one) moves the camera ("Moves the camera": up and down forward and back, sideways sideways) or zooms and turns ("Zooms and rotates"), and with Option tilts and turns; Control or Command with the wheel is a pinch (Windows' precision touchpads send their pinch so) and zooms; the deltas are SDL's as they come, which follow the system's natural scrolling; a notched wheel is not taken (the original's 10 a step); in fly mode a notched wheel and the pinch move along the view, a swipe looks, and with the right button held the wheel sets the fly speed (a quarter to four times the setting); true when taken | Why: the Free camera's trackpad, as SPEC asks
 inline bool PortFreeWheel(float x, float y, bool fractional, int32_t modifiers, uint64_t nowMs, bool overPark) {
     if (!gPortFreeCamera) return false;
     if (fractional) {
@@ -199,6 +277,18 @@ inline bool PortFreeWheel(float x, float y, bool fractional, int32_t modifiers, 
     }
     if (!overPark || (gFirstPersonFlags & kFirstPersonAny) != 0) return false;
     const bool fine = fractional || (gPortFree.haveFine && nowMs >= gPortFree.lastFineMs && nowMs - gPortFree.lastFineMs < kPortFreeFineMs);
+    if (PortFreeFlying()) {
+        if (gPortFree.dragButton == 1) {   // right button held: the fly speed
+            gPortFree.flySpeedLive = std::fmin(std::fmax(gPortFree.flySpeedLive * std::pow(kPortFreeFlySpeedStep, y), 0.25f), 4.0f);
+        } else if ((modifiers & 0xc) != 0 || !fine) {   // a pinch (Windows) or a notched wheel: along the view
+            gPortFree.flyAhead += y * kPortFreeFlyWheelStep;
+        } else {   // a swipe looks
+            const float sense = gPortFreeLookSensitivity;
+            gPortFree.dYaw += x * kPortFreeSwipeTurn * sense;
+            gPortFree.dPitch -= y * kPortFreeSwipeTilt * sense * (gPortFreeInvertLook ? -1.0f : 1.0f);
+        }
+        return true;
+    }
     if ((modifiers & 0xc) != 0) {
         gPortFree.zoomScale *= std::pow(kPortFreePinchZoom, y);
         return true;
@@ -219,14 +309,18 @@ inline bool PortFreeWheel(float x, float y, bool fractional, int32_t modifiers, 
     return true;
 }
 
-// TPW_PORT_FIX freecam PortFreeDragStart | Mac: (none: the middle button turned the view by the pointer's distance from the middle of the screen) | Port: with gPortFreeCamera on, over the park and not in first person, the middle button, or the left with Option, starts a drag the run loop holds in relative mouse mode: sideways turns, up and down tilts, by how far it moves; true when taken | Why: the Free camera's mouse, as SPEC asks
-inline bool PortFreeDragStart(int button, int32_t modifiers, bool overPark) {
-    if (!gPortFreeCamera || !overPark || (gFirstPersonFlags & kFirstPersonAny) != 0) return false;
+// TPW_PORT_FIX freecam PortFreeDragStart | Mac: (none: the middle button turned the view by the pointer's distance from the middle of the screen) | Port: with gPortFreeCamera on, over the park and not in first person, the middle button, or the left with Option, starts a drag the run loop holds in relative mouse mode: sideways turns, up and down tilts (in fly mode: looks), by how far it moves; in fly mode the right button too, whose quick click still goes to the game (2); 0 when not taken | Why: the Free camera's mouse, as SPEC asks
+inline int PortFreeDragStart(int button, int32_t modifiers, bool overPark) {
+    if (!gPortFreeCamera || !overPark || (gFirstPersonFlags & kFirstPersonAny) != 0) return 0;
     if (button == 2 || (button == 0 && (modifiers & 0x30) != 0)) {
         gPortFree.dragButton = button;
-        return true;
+        return 1;
     }
-    return false;
+    if (button == 1 && PortFreeFlying()) {
+        gPortFree.dragButton = button;
+        return 2;
+    }
+    return 0;
 }
 inline void PortFreeDragMove(float dx, float dy) {
     if (gPortFree.dragButton < 0) return;
@@ -241,9 +335,11 @@ inline bool PortFreeDragGoing(bool panelOpen) {
 inline void PortFreeDragEnd() { gPortFree.dragButton = -1; }
 
 // A pinch's scale change since the last (SDL 3.4's SDL_EVENT_PINCH_UPDATE): above 1 zooms in.
+// In fly mode it moves along the view.
 inline void PortFreePinch(float scale, bool overPark) {
     if (!gPortFreeCamera || !overPark || (gFirstPersonFlags & kFirstPersonAny) != 0 || !(scale > 0.0f)) return;
-    gPortFree.zoomScale /= scale;
+    if (PortFreeFlying()) gPortFree.flyAhead += std::log(scale) * kPortFreeFlyPinchMove;
+    else gPortFree.zoomScale /= scale;
 }
 
 // Clears what the input asked for (HandleCamera took it, or first person dropped it).
